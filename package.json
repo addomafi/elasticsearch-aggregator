@@ -1,0 +1,21 @@
+{
+  "name": "elasticsearch-aggregator",
+  "version": "1.0.0",
+  "description": "A tool to aggregate data from elasticsearch into another elasticsearch index",
+  "main": "elasticaggregator.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "aggregator",
+    "consolidator",
+    "elasticsearch",
+    "compress"
+  ],
+  "author": "Adauto Martins <adauto.martins@ideotech.com.br>",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "async": "^2.4.0",
+    "optimist": "^0.6.1"
+  }
+}
