@@ -16,6 +16,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "async": "^2.4.0",
+    "elasticsearch": "^13.2.0",
     "optimist": "^0.6.1"
   }
 }
