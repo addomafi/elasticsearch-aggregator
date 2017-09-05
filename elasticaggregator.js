@@ -255,27 +255,35 @@ var elasticaggs = function () {
 			var toIndex = options.index.replace(/detail/, "aggs").slice(0, -3);
 
 			console.log(`Exporting from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}", to index "${toIndex}".`);
-
-			self.export({
-				index: options.index.replace(/detail/, "aggs").slice(0, -3),
-				type: options.type,
-				timeout: "5m"
-			}, aggsData, function(data) {
+			if (aggsData.length <= 0) {
 				options.minTimestamp = currentMaxTimestamp;
 				if (options.minTimestamp <= options.maxTimestamp) {
 					self.process(options, success, error);
 				} else {
 					success(data);
 				}
-			}, function(err) {
-				if (err.displayName && err.displayName === "RequestTimeout") {
-					console.log(`Timeout during export of data from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}"`);
-					self.process(options, success, error);
-				} else {
-					console.log(`Error during export of data ${JSON.stringify(err)}`)
-					error(err)
-				}
-			});
+			} else {
+				self.export({
+					index: options.index.replace(/detail/, "aggs").slice(0, -3),
+					type: options.type,
+					timeout: "5m"
+				}, aggsData, function(data) {
+					options.minTimestamp = currentMaxTimestamp;
+					if (options.minTimestamp <= options.maxTimestamp) {
+						self.process(options, success, error);
+					} else {
+						success(data);
+					}
+				}, function(err) {
+					if (err.displayName && err.displayName === "RequestTimeout") {
+						console.log(`Timeout during export of data from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}"`);
+						self.process(options, success, error);
+					} else {
+						console.log(`Error during export of data ${JSON.stringify(err)}`)
+						error(err)
+					}
+				});
+			}
 		}, function(err) {
 			if (err.displayName && err.displayName === "RequestTimeout") {
 				console.log(`Timeout during search for data from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}"`);
@@ -322,7 +330,7 @@ elasticaggs.prototype.aggregate = function (index, type, success, error) {
 	var maxTimestamp = 0;
 
 	self.getTimestamp(index, 'asc', function() {}, function(data) {
-		minTimestamp = data.hits.hits[0].sort[0];
+		minTimestamp = 1503636488386;
 		self.getTimestamp(index, 'desc', function() {}, function(data) {
 			maxTimestamp = data.hits.hits[0].sort[0];
 			self.process({
