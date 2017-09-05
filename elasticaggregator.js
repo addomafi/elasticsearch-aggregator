@@ -194,7 +194,8 @@ var elasticaggs = function () {
 
 		self.client.search({
 			index: options.index,
-			body: options.type === "osb-success-aggs-logging" ? bodySuccess : bodyError
+			body: options.type === "osb-success-aggs-logging" ? bodySuccess : bodyError,
+			timeout: "5m"
 		}).then(function(data) {
 			var aggsData = [];
 
@@ -241,7 +242,7 @@ var elasticaggs = function () {
 					"metricType": null,
 					"value": 0,
 					"count": 0,
-					"aggregated": falsxe
+					"aggregated": false
 				}
 			};
 
@@ -255,15 +256,35 @@ var elasticaggs = function () {
 
 			console.log(`Exporting from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}", to index "${toIndex}".`);
 
-			self.export({index: options.index.replace(/detail/, "aggs").slice(0, -3), type: options.type}, aggsData, function(data) {
+			self.export({
+				index: options.index.replace(/detail/, "aggs").slice(0, -3),
+				type: options.type,
+				timeout: "5m"
+			}, aggsData, function(data) {
 				options.minTimestamp = currentMaxTimestamp;
 				if (options.minTimestamp <= options.maxTimestamp) {
 					self.process(options, success, error);
 				} else {
 					success(data);
 				}
-			}, function(err) {console.log(err)});
-		}, error);
+			}, function(err) {
+				if (err.displayName && err.displayName === "RequestTimeout") {
+					console.log(`Timeout during export of data from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}"`);
+					self.process(options, success, error);
+				} else {
+					console.log(`Error during export of data ${JSON.stringify(err)}`)
+					error(err)
+				}
+			});
+		}, function(err) {
+			if (err.displayName && err.displayName === "RequestTimeout") {
+				console.log(`Timeout during search for data from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}"`);
+				self.process(options, success, error);
+			} else {
+				console.log(`Error during read of data ${JSON.stringify(err)}`)
+				error(err)
+			}
+		});
 	};
 
 	self.export = function (indexConfig, data, success, errorCallback) {
@@ -318,7 +339,6 @@ elasticaggs.prototype.aggregate = function (index, type, success, error) {
 					}
 				});
 			},function (err) {
-				console.log(err);
 				error(err);
 			});
 		});
