@@ -1,4 +1,8 @@
 var es = require('elasticsearch')
+var moment = require('moment')
+var _ = require('lodash')
+var extend = require('extend')
+var PromiseBB = require("bluebird")
 
 var elasticaggs = function () {
 	var self = this
@@ -7,36 +11,36 @@ var elasticaggs = function () {
 		log: 'warning'
 	});
 
-	self.getTimestamp = function (index, order, error, success) {
+	self.getTimestamp = function (options, order, error, success) {
 		self.client.search({
-			index: index,
-			body: {
+			index: options.index,
+			body: JSON.parse(`{
 				"size": 1,
-				"query": { },
-				"_source": [ "timestamp" ],
+				"query": {"bool":{"must":[{"query_string":{"query":"*"}}]}},
+				"_source": [ "${options.timefield}" ],
 				"sort": [
 					{
-						"timestamp": {
-							"order": order
+						"${options.timefield}": {
+							"order": "${order}"
 						}
 					}
 				]
-			}
+			}`)
 		}).then(success, error);
 	};
 
 	self.process = function(options, success, error) {
 		var currentMaxTimestamp = options.minTimestamp + (60000 * 60);
 
-		var bodySuccess = {
+		var body = JSON.parse(`{
 			"size": 0,
 			"query": {
 				"bool": {
 					"must": [{
 						"range": {
-							"timestamp": {
-								"gte": options.minTimestamp,
-								"lte": currentMaxTimestamp,
+							"${options.timefield}": {
+								"gte": ${options.minTimestamp},
+								"lt": ${currentMaxTimestamp},
 								"format": "epoch_millis"
 							}
 						}
@@ -48,153 +52,21 @@ var elasticaggs = function () {
 				"excludes": []
 			},
 			"aggs": {
-				"timestamp": {
+				"${options.timefield}": {
 					"date_histogram": {
-						"field": "timestamp",
+						"field": "${options.timefield}",
 						"interval": "15m",
 						"time_zone": "America/Sao_Paulo",
 						"min_doc_count": 1
 					},
-					"aggs": {
-						"component": {
-							"terms": {
-								"field": "component",
-								"size": 99999999,
-								"order": {
-									"_term": "desc"
-								}
-							},
-							"aggs": {
-								"instance": {
-									"terms": {
-										"field": "instance",
-										"size": 99999999,
-										"order": {
-											"_term": "desc"
-										}
-									},
-									"aggs": {
-										"metricType": {
-											"terms": {
-												"field": "metricType",
-												"size": 99999999,
-												"order": {
-													"_term": "desc"
-												}
-											},
-											"aggs": {
-												"value": {
-													"avg": {
-														"field": "value"
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
+					"aggs": ${JSON.stringify(options.structAggs)}
 				}
 			}
-		};
-
-		var bodyError = {
-			"size": 0,
-			"query": {
-				"bool": {
-					"must": [{
-						"range": {
-							"timestamp": {
-								"gte": options.minTimestamp,
-								"lte": currentMaxTimestamp,
-								"format": "epoch_millis"
-							}
-						}
-					}],
-					"must_not": []
-				}
-			},
-			"_source": {
-				"excludes": []
-			},
-			"aggs": {
-				"timestamp": {
-					"date_histogram": {
-						"field": "timestamp",
-						"interval": "15m",
-						"time_zone": "America/Sao_Paulo",
-						"min_doc_count": 1
-					},
-					"aggs": {
-						"component": {
-							"terms": {
-								"field": "component",
-								"size": 99999999,
-								"order": {
-									"_term": "desc"
-								}
-							},
-							"aggs": {
-								"instance": {
-									"terms": {
-										"field": "instance",
-										"size": 99999999,
-										"order": {
-											"_term": "desc"
-										}
-									},
-									"aggs": {
-										"metricType": {
-											"terms": {
-												"field": "metricType",
-												"size": 99999999,
-												"order": {
-													"_term": "desc"
-												}
-											},
-											"aggs": {
-												"errorMessage": {
-													"terms": {
-														"field": "errorMessage",
-														"size": 99999999,
-														"order": {
-															"_term": "desc"
-														}
-													},
-													"aggs": {
-														"way": {
-															"terms": {
-																"field": "way",
-																"size": 99999999,
-																"order": {
-																	"_term": "desc"
-																}
-															},
-															"aggs": {
-																"value": {
-																	"avg": {
-																		"field": "value"
-																	}
-																}
-															}
-														}
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		};
+		}`);
 
 		self.client.search({
 			index: options.index,
-			body: options.type === "osb-success-aggs-logging" ? bodySuccess : bodyError,
+			body: body,
 			timeout: "5m"
 		}).then(function(data) {
 			var aggsData = [];
@@ -233,28 +105,24 @@ var elasticaggs = function () {
 				}
 			};
 
-			var dataTransfer = {
-				model: {
-					"timestamp": null,
-					"instance": null,
-					"way": null,
-					"component": null,
-					"metricType": null,
+			var dataTransfer = JSON.parse(`{
+				"model": {
+					"${options.timefield}": null,
 					"value": 0,
 					"count": 0,
 					"aggregated": false
 				}
-			};
+			}`);
 
-			if (options.type === "osb-error-aggs-logging") {
-				dataTransfer.model["errorMessage"] = null;
-			}
+			// Extends with aggs custom fields
+			dataTransfer.model = extend(options.aggs, dataTransfer.model)
+			_.forEach(dataTransfer.model, (value, key) => {
+				if (value) dataTransfer.model[key] = null
+			})
 
 			iterate(data.aggregations, JSON.parse(JSON.stringify(dataTransfer)));
 
-			var toIndex = options.index.replace(/detail/, "aggs").slice(0, -3);
-
-			console.log(`Exporting from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}", to index "${toIndex}".`);
+			console.log(`Exporting from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}", to index "${options.toIndex}".`);
 			if (aggsData.length <= 0) {
 				options.minTimestamp = currentMaxTimestamp;
 				if (options.minTimestamp <= options.maxTimestamp) {
@@ -264,10 +132,11 @@ var elasticaggs = function () {
 				}
 			} else {
 				self.export({
-					index: options.index.replace(/detail/, "aggs").slice(0, -3),
+					index: options.toIndex,
 					type: options.type,
 					timeout: "5m"
 				}, aggsData, function(data) {
+					console.log(`${aggsData.length} items was exported.`)
 					options.minTimestamp = currentMaxTimestamp;
 					if (options.minTimestamp <= options.maxTimestamp) {
 						self.process(options, success, error);
@@ -295,12 +164,21 @@ var elasticaggs = function () {
 		});
 	};
 
-	self.export = function (indexConfig, data, success, errorCallback) {
-		// var client = new es.Client({
-		// 	host: 'http://elastic:changeme@localhost:9200',
-		// 	log: 'warning'
-		// });
+	self._save = body => {
+		return new Promise((resolve, reject) => {
+			self.client.bulk({
+				body: body
+			}, function (error, response) {
+				if (error) {
+					reject(error);
+				} else {
+					resolve(response);
+				}
+			});
+		})
+	}
 
+	self.export = function (indexConfig, data, success, errorCallback) {
 		var self = this
 
 		var body = [];
@@ -309,37 +187,82 @@ var elasticaggs = function () {
 			body.push(item);
 		});
 
-		if (body.length > 0) {
-			self.client.bulk({
-				body: body
-			}, function (error, response) {
-				if (error) {
-					errorCallback(error);
-				} else {
-					success(response);
-				}
-			});
-		}
+		PromiseBB.map(_.chunk(body, 100), function(item) {
+			return self._save(item);
+		}, {concurrency: 10}).then(results => {
+      success(results);
+    }).catch(err => {
+      errorCallback(err);
+    });
 	};
 }
 
-elasticaggs.prototype.aggregate = function (index, type, success, error) {
+elasticaggs.prototype.aggregate = function (options, success, error) {
 	var self = this
+
+	var structAggs = (aggs) => {
+		var template = (field, metric) => {
+			if (metric === "terms") {
+				return JSON.parse(`{
+					"${field}": {
+						"terms": {
+							"field": "${field}",
+							"size": 99999999,
+							"order": {
+								"_term": "desc"
+							}
+						}
+					}
+				}`)
+			} else if (metric === "avg") {
+				return JSON.parse(`{
+					"${field}": {
+						"avg": {
+							"field": "${field}"
+						}
+					}
+				}`)
+			}
+		};
+
+		var struct
+		var workingOn;
+		_.forEach(aggs, (metric, field) => {
+			if (!struct) {
+				struct = {aggs: template(field, metric)}
+				workingOn = struct.aggs;
+			} else {
+				var lastKey = Object.keys(workingOn)[0];
+				workingOn[lastKey].aggs = template(field, metric);
+				workingOn = workingOn[lastKey].aggs;
+			}
+		})
+
+		return struct
+	};
+
+	options.structAggs = structAggs(options.aggs).aggs
+
+	var clearTime = timestamp => {
+		var time = moment(timestamp)
+		time.minute(0)
+		time.second(0)
+		time.millisecond(0)
+
+		return time.valueOf()
+	}
 
 	var minTimestamp = 0;
 	var maxTimestamp = 0;
-
-	self.getTimestamp(index, 'asc', function() {}, function(data) {
-		minTimestamp = 1503636488386;
-		self.getTimestamp(index, 'desc', function() {}, function(data) {
+	self.getTimestamp(options, 'asc', function() {}, function(data) {
+		minTimestamp = data.hits.hits[0].sort[0];
+		self.getTimestamp(options, 'desc', function() {}, function(data) {
 			maxTimestamp = data.hits.hits[0].sort[0];
-			self.process({
-				index: index,
-				type: type,
-				minTimestamp: minTimestamp,
-				maxTimestamp: maxTimestamp
-			}, function(data) {
-				self.client.indices.delete({index: index}, function(error, response) {
+			self.process(extend(options, {
+				minTimestamp: clearTime(minTimestamp),
+				maxTimestamp: clearTime(maxTimestamp)
+			}), function(data) {
+				self.client.indices.delete({index: options.index}, function(error, response) {
 					if (error) {
 						error(error);
 					} else {
