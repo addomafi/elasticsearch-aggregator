@@ -4,14 +4,17 @@ var _ = require('lodash')
 var extend = require('extend')
 var PromiseBB = require("bluebird")
 
-var elasticaggs = function () {
+var elasticaggs = function (options) {
 	var self = this
+
+	self.options = options
+
 	self.client = new es.Client({
-		host: process.env.ELK_HOST,
+		host: options.host,
 		log: 'warning'
 	});
 
-	self.getTimestamp = function (options, order, error, success) {
+	self.getTimestamp = function (order, error, success) {
 		self.client.search({
 			index: options.index,
 			body: JSON.parse(`{
@@ -29,7 +32,7 @@ var elasticaggs = function () {
 		}).then(success, error);
 	};
 
-	self.process = function(options, success, error) {
+	self.process = function(success, error) {
 		var currentMaxTimestamp = options.minTimestamp + (60000 * 60);
 
 		var body = JSON.parse(`{
@@ -126,7 +129,7 @@ var elasticaggs = function () {
 			if (aggsData.length <= 0) {
 				options.minTimestamp = currentMaxTimestamp;
 				if (options.minTimestamp <= options.maxTimestamp) {
-					self.process(options, success, error);
+					self.process(success, error);
 				} else {
 					success(data);
 				}
@@ -139,14 +142,14 @@ var elasticaggs = function () {
 					console.log(`${aggsData.length} items was exported.`)
 					options.minTimestamp = currentMaxTimestamp;
 					if (options.minTimestamp <= options.maxTimestamp) {
-						self.process(options, success, error);
+						self.process(success, error);
 					} else {
 						success(data);
 					}
 				}, function(err) {
 					if (err.displayName && err.displayName === "RequestTimeout") {
 						console.log(`Timeout during export of data from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}"`);
-						self.process(options, success, error);
+						self.process(success, error);
 					} else {
 						console.log(`Error during export of data ${JSON.stringify(err)}`)
 						error(err)
@@ -156,7 +159,7 @@ var elasticaggs = function () {
 		}, function(err) {
 			if (err.displayName && err.displayName === "RequestTimeout") {
 				console.log(`Timeout during search for data from index "${options.index}" with search params, minTimestamp "${options.minTimestamp}" and maxTimestamp "${currentMaxTimestamp}"`);
-				self.process(options, success, error);
+				self.process(success, error);
 			} else {
 				console.log(`Error during read of data ${JSON.stringify(err)}`)
 				error(err)
@@ -197,7 +200,7 @@ var elasticaggs = function () {
 	};
 }
 
-elasticaggs.prototype.aggregate = function (options, success, error) {
+elasticaggs.prototype.aggregate = function (success, error) {
 	var self = this
 
 	var structAggs = (aggs) => {
@@ -241,7 +244,7 @@ elasticaggs.prototype.aggregate = function (options, success, error) {
 		return struct
 	};
 
-	options.structAggs = structAggs(options.aggs).aggs
+	self.options.structAggs = structAggs(self.options.aggs).aggs
 
 	var clearTime = timestamp => {
 		var time = moment(timestamp)
@@ -254,9 +257,9 @@ elasticaggs.prototype.aggregate = function (options, success, error) {
 
 	var minTimestamp = 0;
 	var maxTimestamp = 0;
-	self.getTimestamp(options, 'asc', function() {}, function(data) {
+	self.getTimestamp('asc', function() {}, function(data) {
 		minTimestamp = data.hits.hits[0].sort[0];
-		self.getTimestamp(options, 'desc', function() {}, function(data) {
+		self.getTimestamp('desc', function() {}, function(data) {
 			maxTimestamp = data.hits.hits[0].sort[0];
 			self.process(extend(options, {
 				minTimestamp: clearTime(minTimestamp),

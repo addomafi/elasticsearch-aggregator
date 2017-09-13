@@ -10,9 +10,8 @@ var _ = require('lodash')
 var argv = require('optimist').argv
 var Elasticaggs = require(path.join(__dirname, '..', 'elasticaggregator.js'))
 
-var aggs = new Elasticaggs()
-
 var options = {
+  host: argv["host"],
   index: argv["index"],
   toIndex: argv["toIndex"],
   type: argv["type"],
@@ -24,7 +23,8 @@ _.forEach(_.split(argv["aggs"], ','), item => {
   options.aggs = extend(options.aggs, _.fromPairs([_.split(item, ':', 2)]))
 })
 
-aggs.aggregate(options, function (data) {
+var aggs = new Elasticaggs(options)
+aggs.aggregate(function (data) {
   console.log(JSON.stringify(data));
   console.log('Ends with success!!!');
 }, function (err) {})
