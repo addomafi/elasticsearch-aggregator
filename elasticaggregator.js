@@ -258,11 +258,11 @@ elasticaggs.prototype.aggregate = function (success, error) {
 	var minTimestamp = 0;
 	var maxTimestamp = 0;
 	self.getTimestamp('asc', function() {}, function(data) {
-		self.options.minTimestamp = data.hits.hits[0].sort[0];
+		self.options.minTimestamp = 1505260795000;
 		self.getTimestamp('desc', function() {}, function(data) {
 			self.options.maxTimestamp = data.hits.hits[0].sort[0];
 			self.process(function(data) {
-				self.client.indices.delete({index: options.index}, function(error, response) {
+				self.client.indices.delete({index: self.options.index}, function(error, response) {
 					if (error) {
 						error(error);
 					} else {
